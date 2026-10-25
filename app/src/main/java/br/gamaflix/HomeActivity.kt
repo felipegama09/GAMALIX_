@@ -18,6 +18,7 @@ import coil.load
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import java.io.File
 
 class RowCard(val title: String, val logo: String?, val onClick: () -> Unit)
 
@@ -32,10 +33,6 @@ class HomeActivity : AppCompatActivity() {
 
     private lateinit var rvRows: RecyclerView
     private lateinit var progress: View
-    private lateinit var heroPanel: View
-    private lateinit var ivHero: ImageView
-    private lateinit var tvHeroTitle: TextView
-    private lateinit var btnHero: TextView
     private val rowAdapter = RowAdapter()
     private var job: Job? = null
 
@@ -51,10 +48,6 @@ class HomeActivity : AppCompatActivity() {
         showCrashIfAny()
         rvRows = findViewById(R.id.rvRows)
         progress = findViewById(R.id.progress)
-        heroPanel = findViewById(R.id.heroPanel)
-        ivHero = findViewById(R.id.ivHero)
-        tvHeroTitle = findViewById(R.id.tvHeroTitle)
-        btnHero = findViewById(R.id.btnHero)
         rvRows.layoutManager = LinearLayoutManager(this)
         rvRows.adapter = rowAdapter
         rvRows.itemAnimator = null
@@ -82,23 +75,12 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    /** Destaque no topo: um filme da lista, com o pôster como fundo. */
-    private fun bindHero(item: Item?) {
-        if (item == null) {
-            heroPanel.visibility = View.GONE
-            return
-        }
-        heroPanel.visibility = View.VISIBLE
-        tvHeroTitle.text = item.name
-        item.logo?.takeIf { it.isNotBlank() }?.let { ivHero.load(it) }
-        btnHero.setOnClickListener { openDetail(item) }
-    }
-
     private fun openDetail(item: Item) {
         Pick.item = item
         startActivity(Intent(this, DetailActivity::class.java))
     }
 
+    /** Linhas da Home, nesta ordem: Filmes, Séries (mais assistidos) e VOD (vistos recentemente). */
     private fun loadRows() {
         val source = Store.source ?: return
         job?.cancel()
@@ -106,34 +88,39 @@ class HomeActivity : AppCompatActivity() {
         job = lifecycleScope.launch {
             val rows = ArrayList<RowData>()
             try {
-                val hist = History.all(this@HomeActivity)
-                if (hist.isNotEmpty()) {
+                // O provedor não informa número de visualizações: usamos a ordem da lista dele.
+                val movies = Store.cache[Kind.MOVIE] ?: source.load(Kind.MOVIE).also { Store.cache[Kind.MOVIE] = it }
+                rows.add(
+                    RowData(
+                        "Filmes: Mais assistidos",
+                        movies.items.take(20).map { item -> RowCard(item.name, item.logo) { openDetail(item) } },
+                        wide = false,
+                        onTitle = { openSection(Kind.MOVIE) }
+                    )
+                )
+
+                val series = Store.cache[Kind.SERIES] ?: source.load(Kind.SERIES).also { Store.cache[Kind.SERIES] = it }
+                rows.add(
+                    RowData(
+                        "Séries: Mais assistidos",
+                        series.items.take(20).map { item -> RowCard(item.name, item.logo) { openDetail(item) } },
+                        wide = false,
+                        onTitle = { openSection(Kind.SERIES) }
+                    )
+                )
+
+                val recent = History.all(this@HomeActivity).filter { it.kind == Kind.LIVE }.take(20)
+                if (recent.isNotEmpty()) {
+                    val channels = recent.map { h -> Item(h.id, h.name, h.logo, "", h.url, Kind.LIVE) }
                     rows.add(
                         RowData(
-                            "Assistidos recentemente",
-                            hist.take(20).map { h -> RowCard(h.name, h.logo) { resume(h) } },
+                            "VOD: Vistos recentemente",
+                            channels.mapIndexed { i, ch -> RowCard(ch.name, ch.logo) { playChannels(channels, i) } },
                             wide = true,
-                            onTitle = null
+                            onTitle = { openSection(Kind.LIVE) }
                         )
                     )
                 }
-                for (k in listOf(Kind.MOVIE, Kind.SERIES, Kind.LIVE)) {
-                    val cat = Store.cache[k] ?: source.load(k).also { Store.cache[k] = it }
-                    val title = when (k) {
-                        Kind.MOVIE -> "Filmes"
-                        Kind.SERIES -> "Séries"
-                        Kind.LIVE -> "VOD"
-                    }
-                    rows.add(
-                        RowData(
-                            title,
-                            cat.items.take(25).map { item -> RowCard(item.name, item.logo) { if (k == Kind.LIVE) openSection(k) else openDetail(item) } },
-                            wide = k == Kind.LIVE,
-                            onTitle = { openSection(k) }
-                        )
-                    )
-                }
-            bindHero(Store.cache[Kind.MOVIE]?.items?.firstOrNull { !it.logo.isNullOrBlank() })
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
@@ -145,33 +132,13 @@ class HomeActivity : AppCompatActivity() {
         }
     }
 
-    /** Retoma um assistido a partir da posição salva. */
-    private fun resume(h: Hist) {
-        Store.playList = listOf(Item(h.id, h.name, h.logo, "", h.url, h.kind))
-        Store.playIndex = 0
-        Store.zap = false
+    /** Assiste um canal recente em tela cheia; OK/setas trocam entre os recentes. */
+    private fun playChannels(list: List<Item>, index: Int) {
+        Store.playList = list
+        Store.playIndex = index
+        Store.zap = true
         Store.autoNext = false
-        Resume.pos = h.pos
         startActivity(Intent(this, PlayerActivity::class.java))
-    }
-
-    /** Se o app fechou sozinho na última vez, mostra o erro gravado para copiar e enviar. */
-    private fun showCrashIfAny() {
-        val f = java.io.File(filesDir, App.CRASH_FILE)
-        if (!f.exists()) return
-        val text = try { f.readText() } catch (e: Exception) { return }
-        AlertDialog.Builder(this, R.style.NovaDialog)
-            .setTitle("O app fechou inesperadamente")
-            .setMessage(text.take(3500))
-            .setPositiveButton("Copiar erro") { _, _ ->
-                val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-                cm.setPrimaryClip(android.content.ClipData.newPlainText("erro", text))
-                f.delete()
-                Toast.makeText(this, "Erro copiado", Toast.LENGTH_SHORT).show()
-            }
-            .setNegativeButton("Fechar") { _, _ -> f.delete() }
-            .setCancelable(false)
-            .show()
     }
 
     private fun openSettings() {
@@ -191,7 +158,7 @@ class HomeActivity : AppCompatActivity() {
     private fun confirmClearHistory() {
         AlertDialog.Builder(this, R.style.NovaDialog)
             .setTitle("Apagar assistidos recentemente?")
-            .setMessage("O histórico e as posições para retomar serão removidos.")
+            .setMessage("Os filmes, séries e canais vistos recentemente serão removidos.")
             .setPositiveButton("Apagar") { _, _ ->
                 History.clear(this)
                 Toast.makeText(this, "Histórico apagado", Toast.LENGTH_SHORT).show()
@@ -206,6 +173,25 @@ class HomeActivity : AppCompatActivity() {
         Store.reset()
         startActivity(Intent(this, LoginActivity::class.java))
         finish()
+    }
+
+    /** Se o app fechou sozinho na última vez, mostra o erro gravado para copiar e enviar. */
+    private fun showCrashIfAny() {
+        val f = File(filesDir, App.CRASH_FILE)
+        if (!f.exists()) return
+        val text = try { f.readText() } catch (e: Exception) { return }
+        AlertDialog.Builder(this, R.style.NovaDialog)
+            .setTitle("O app fechou inesperadamente")
+            .setMessage(text.take(3500))
+            .setPositiveButton("Copiar erro") { _, _ ->
+                val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("erro", text))
+                f.delete()
+                Toast.makeText(this, "Erro copiado", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Fechar") { _, _ -> f.delete() }
+            .setCancelable(false)
+            .show()
     }
 }
 

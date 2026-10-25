@@ -113,7 +113,6 @@ class PlayerActivity : AppCompatActivity() {
 
     private fun remember(item: Item, posMs: Long) {
         val url = item.url ?: return
-        if (Store.zap || item.kind == Kind.LIVE) return
         History.save(this, Hist(item.id, item.kind, item.name, item.logo, url, posMs, System.currentTimeMillis()))
     }
 

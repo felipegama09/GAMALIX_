@@ -86,7 +86,7 @@ data class Hist(
 
 object History {
     private const val KEY = "history"
-    private const val MAX = 30
+    private const val MAX = 60
 
     private fun sp(c: android.content.Context) =
         c.getSharedPreferences("gamaflix_history", android.content.Context.MODE_PRIVATE)

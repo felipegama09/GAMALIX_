@@ -95,6 +95,10 @@ class LiveActivity : AppCompatActivity() {
         rvCats.itemAnimator = null
         rvChannels.itemAnimator = null
 
+        findViewById<TextView>(R.id.tabHome).setOnClickListener { finish() }
+        findViewById<TextView>(R.id.tabLive).isSelected = true
+        findViewById<TextView>(R.id.tabMovies).setOnClickListener { switchTo(MainActivity::class.java, Kind.MOVIE) }
+        findViewById<TextView>(R.id.tabSeries).setOnClickListener { switchTo(MainActivity::class.java, Kind.SERIES) }
         // Clicar na prévia também abre o canal em tela cheia.
         preview.setOnClickListener { if (selected >= 0) openFull(selected) }
         loadCatalog()
@@ -239,6 +243,14 @@ class LiveActivity : AppCompatActivity() {
         Store.autoNext = false
         stopPreview()
         startActivity(Intent(this, PlayerActivity::class.java))
+    }
+
+    /** Abre outra seção e fecha esta, para a pilha ficar sempre: Início, seção atual. */
+    private fun switchTo(cls: Class<*>, kind: Kind? = null) {
+        val i = Intent(this, cls)
+        if (kind != null) i.putExtra("kind", kind.name)
+        startActivity(i)
+        finish()
     }
 
     private fun nowSec(): Long = System.currentTimeMillis() / 1000

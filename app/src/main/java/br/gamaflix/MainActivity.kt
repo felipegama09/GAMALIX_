@@ -25,10 +25,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rvItems: RecyclerView
     private lateinit var tvEmpty: TextView
     private lateinit var progress: View
-    private lateinit var heroPanel: View
-    private lateinit var ivHero: ImageView
-    private lateinit var tvHeroTitle: TextView
-    private lateinit var btnHero: TextView
     private lateinit var tabs: List<Pair<TextView, Kind>>
     private lateinit var grid: GridLayoutManager
     private lateinit var itemAdapter: ItemAdapter
@@ -54,10 +50,6 @@ class MainActivity : AppCompatActivity() {
         rvItems = findViewById(R.id.rvItems)
         tvEmpty = findViewById(R.id.tvEmpty)
         progress = findViewById(R.id.progress)
-        heroPanel = findViewById(R.id.heroPanel)
-        ivHero = findViewById(R.id.ivHero)
-        tvHeroTitle = findViewById(R.id.tvHeroTitle)
-        btnHero = findViewById(R.id.btnHero)
 
         grid = GridLayoutManager(this, 4)
         itemAdapter = ItemAdapter { list, pos -> onItem(list, pos) }
@@ -77,6 +69,9 @@ class MainActivity : AppCompatActivity() {
             findViewById<TextView>(R.id.tabSeries) to Kind.SERIES
         )
         tabs.forEach { (v, k) -> v.setOnClickListener { select(k) } }
+        // VOD e Início sempre abrem a tela certa (VOD tem layout próprio).
+        findViewById<TextView>(R.id.tabLive).setOnClickListener { switchTo(LiveActivity::class.java) }
+        findViewById<TextView>(R.id.tabHome).setOnClickListener { finish() }
         findViewById<TextView>(R.id.btnSearch).setOnClickListener { askSearch() }
         findViewById<TextView>(R.id.btnLogout).setOnClickListener { logout() }
 
@@ -114,7 +109,6 @@ class MainActivity : AppCompatActivity() {
             try {
                 val c = Store.cache[k] ?: Store.source!!.load(k).also { Store.cache[k] = it }
                 catalog = c
-                bindHero(c.items.firstOrNull { !it.logo.isNullOrBlank() })
                 cats = listOf(Cat("*", "Todos")) + c.cats.filter { c.byCat.containsKey(it.id) }
                 catIndex = if (cats.size > 1) 1 else 0
                 catAdapter.setData(cats, catIndex)
@@ -161,19 +155,10 @@ class MainActivity : AppCompatActivity() {
         tvEmpty.visibility = View.VISIBLE
     }
 
-    /** Destaque no topo da seção: um título da lista, com o pôster como fundo. */
-    private fun bindHero(item: Item?) {
-        if (item == null) {
-            heroPanel.visibility = View.GONE
-            return
-        }
-        heroPanel.visibility = View.VISIBLE
-        tvHeroTitle.text = item.name
-        item.logo?.takeIf { it.isNotBlank() }?.let { ivHero.load(it) }
-        btnHero.setOnClickListener {
-            Pick.item = item
-            startActivity(Intent(this, DetailActivity::class.java))
-        }
+    /** Abre outra seção e fecha esta, para a pilha ficar sempre: Início, seção atual. */
+    private fun switchTo(cls: Class<*>) {
+        startActivity(Intent(this, cls))
+        finish()
     }
 
     private fun onItem(list: List<Item>, pos: Int) {
