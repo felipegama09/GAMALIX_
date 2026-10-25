@@ -109,12 +109,23 @@ class HomeActivity : AppCompatActivity() {
                     )
                 )
 
+                // VOD: canais vistos recentemente; se não houver, canais da categoria Telecine.
                 val recent = History.all(this@HomeActivity).filter { it.kind == Kind.LIVE }.take(20)
+                val channels: List<Item>
+                val vodTitle: String
                 if (recent.isNotEmpty()) {
-                    val channels = recent.map { h -> Item(h.id, h.name, h.logo, "", h.url, Kind.LIVE) }
+                    channels = recent.map { h -> Item(h.id, h.name, h.logo, "", h.url, Kind.LIVE) }
+                    vodTitle = "VOD: Vistos recentemente"
+                } else {
+                    val live = Store.cache[Kind.LIVE] ?: source.load(Kind.LIVE).also { Store.cache[Kind.LIVE] = it }
+                    val telecine = live.cats.filter { it.name.contains("telecine", ignoreCase = true) }.map { it.id }.toSet()
+                    channels = live.items.filter { it.cat in telecine }.take(20)
+                    vodTitle = "VOD: Canais Telecine"
+                }
+                if (channels.isNotEmpty()) {
                     rows.add(
                         RowData(
-                            "VOD: Vistos recentemente",
+                            vodTitle,
                             channels.mapIndexed { i, ch -> RowCard(ch.name, ch.logo) { playChannels(channels, i) } },
                             wide = true,
                             onTitle = { openSection(Kind.LIVE) }

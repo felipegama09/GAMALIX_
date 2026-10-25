@@ -14,6 +14,7 @@ class CatAdapter(private val onPick: (index: Int, byClick: Boolean) -> Unit) :
 
     private var data: List<Cat> = emptyList()
     private var sel = 0
+    private val focusHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     fun setData(d: List<Cat>, selected: Int) {
         data = d
@@ -44,7 +45,11 @@ class CatAdapter(private val onPick: (index: Int, byClick: Boolean) -> Unit) :
         }
         h.tv.setOnFocusChangeListener { _, focused ->
             val p = h.bindingAdapterPosition
-            if (focused && p >= 0) onPick(p, false)
+            if (focused && p >= 0) {
+                // Espera o foco parar: ao segurar a tecla não há atualização de lista a cada passo.
+                focusHandler.removeCallbacksAndMessages(null)
+                focusHandler.postDelayed({ onPick(p, false) }, 350)
+            }
         }
     }
 
