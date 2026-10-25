@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/bg_gradient"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="40dp"
+        android:paddingTop="16dp"
+        android:paddingEnd="40dp"
+        android:paddingBottom="8dp">
+
+        <ImageView
+            android:layout_width="104dp"
+            android:layout_height="60dp"
+            android:layout_marginEnd="28dp"
+            android:contentDescription="GamaFlix"
+            android:scaleType="fitCenter"
+            android:src="@drawable/gamaflix_logo" />
+
+        <TextView android:id="@+id/navHome" style="@style/TabText" android:text="Início" />
+        <TextView android:id="@+id/navLive" style="@style/TabText" android:text="VOD" />
+        <TextView android:id="@+id/navMovies" style="@style/TabText" android:text="Filmes" />
+        <TextView android:id="@+id/navSeries" style="@style/TabText" android:text="Séries" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <TextView
+            android:id="@+id/navSettings"
+            style="@style/TabText"
+            android:layout_marginEnd="0dp"
+            android:text="Configurações" />
+    </LinearLayout>
+
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvRows"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:clipToPadding="false"
+            android:paddingTop="8dp"
+            android:paddingBottom="24dp" />
+
+        <ProgressBar
+            android:id="@+id/progress"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:layout_gravity="center"
+            android:indeterminate="true" />
+    </FrameLayout>
+</LinearLayout>
