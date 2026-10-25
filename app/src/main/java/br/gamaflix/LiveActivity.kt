@@ -145,6 +145,15 @@ class LiveActivity : AppCompatActivity() {
     }
 
     private fun previewSelected() {
+        try {
+            previewNow()
+        } catch (e: Exception) {
+            tvPreviewHint.text = "Erro na prévia"
+            tvPreviewHint.visibility = View.VISIBLE
+        }
+    }
+
+    private fun previewNow() {
         val item = channels.getOrNull(selected) ?: return
         val url = item.url ?: return
         val p = player ?: createPlayer().also { player = it }

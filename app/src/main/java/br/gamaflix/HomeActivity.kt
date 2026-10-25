@@ -44,6 +44,7 @@ class HomeActivity : AppCompatActivity() {
             return
         }
         setContentView(R.layout.activity_home)
+        showCrashIfAny()
         rvRows = findViewById(R.id.rvRows)
         progress = findViewById(R.id.progress)
         rvRows.layoutManager = LinearLayoutManager(this)
@@ -131,6 +132,25 @@ class HomeActivity : AppCompatActivity() {
         Store.autoNext = false
         Resume.pos = h.pos
         startActivity(Intent(this, PlayerActivity::class.java))
+    }
+
+    /** Se o app fechou sozinho na última vez, mostra o erro gravado para copiar e enviar. */
+    private fun showCrashIfAny() {
+        val f = java.io.File(filesDir, App.CRASH_FILE)
+        if (!f.exists()) return
+        val text = try { f.readText() } catch (e: Exception) { return }
+        AlertDialog.Builder(this, R.style.NovaDialog)
+            .setTitle("O app fechou inesperadamente")
+            .setMessage(text.take(3500))
+            .setPositiveButton("Copiar erro") { _, _ ->
+                val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("erro", text))
+                f.delete()
+                Toast.makeText(this, "Erro copiado", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Fechar") { _, _ -> f.delete() }
+            .setCancelable(false)
+            .show()
     }
 
     private fun openSettings() {
