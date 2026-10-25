@@ -3,6 +3,8 @@ package br.gamaflix
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.widget.ImageView
+import coil.load
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
@@ -23,10 +25,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rvItems: RecyclerView
     private lateinit var tvEmpty: TextView
     private lateinit var progress: View
+    private lateinit var heroPanel: View
+    private lateinit var ivHero: ImageView
+    private lateinit var tvHeroTitle: TextView
+    private lateinit var btnHero: TextView
     private lateinit var tabs: List<Pair<TextView, Kind>>
     private lateinit var grid: GridLayoutManager
     private lateinit var itemAdapter: ItemAdapter
-    private val catAdapter = CatAdapter { index, byClick -> onCat(index, byClick) }
+    private val catAdapter = CatAdapter { index, byClick -> rvCats.post { onCat(index, byClick) } }
 
     private var kind = Kind.LIVE
     private var catalog: Catalog? = null
@@ -48,6 +54,10 @@ class MainActivity : AppCompatActivity() {
         rvItems = findViewById(R.id.rvItems)
         tvEmpty = findViewById(R.id.tvEmpty)
         progress = findViewById(R.id.progress)
+        heroPanel = findViewById(R.id.heroPanel)
+        ivHero = findViewById(R.id.ivHero)
+        tvHeroTitle = findViewById(R.id.tvHeroTitle)
+        btnHero = findViewById(R.id.btnHero)
 
         grid = GridLayoutManager(this, 4)
         itemAdapter = ItemAdapter { list, pos -> onItem(list, pos) }
@@ -104,6 +114,7 @@ class MainActivity : AppCompatActivity() {
             try {
                 val c = Store.cache[k] ?: Store.source!!.load(k).also { Store.cache[k] = it }
                 catalog = c
+                bindHero(c.items.firstOrNull { !it.logo.isNullOrBlank() })
                 cats = listOf(Cat("*", "Todos")) + c.cats.filter { c.byCat.containsKey(it.id) }
                 catIndex = if (cats.size > 1) 1 else 0
                 catAdapter.setData(cats, catIndex)
@@ -148,6 +159,21 @@ class MainActivity : AppCompatActivity() {
     private fun showEmpty(msg: String) {
         tvEmpty.text = msg
         tvEmpty.visibility = View.VISIBLE
+    }
+
+    /** Destaque no topo da seção: um título da lista, com o pôster como fundo. */
+    private fun bindHero(item: Item?) {
+        if (item == null) {
+            heroPanel.visibility = View.GONE
+            return
+        }
+        heroPanel.visibility = View.VISIBLE
+        tvHeroTitle.text = item.name
+        item.logo?.takeIf { it.isNotBlank() }?.let { ivHero.load(it) }
+        btnHero.setOnClickListener {
+            Pick.item = item
+            startActivity(Intent(this, DetailActivity::class.java))
+        }
     }
 
     private fun onItem(list: List<Item>, pos: Int) {

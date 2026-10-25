@@ -32,6 +32,10 @@ class HomeActivity : AppCompatActivity() {
 
     private lateinit var rvRows: RecyclerView
     private lateinit var progress: View
+    private lateinit var heroPanel: View
+    private lateinit var ivHero: ImageView
+    private lateinit var tvHeroTitle: TextView
+    private lateinit var btnHero: TextView
     private val rowAdapter = RowAdapter()
     private var job: Job? = null
 
@@ -47,6 +51,10 @@ class HomeActivity : AppCompatActivity() {
         showCrashIfAny()
         rvRows = findViewById(R.id.rvRows)
         progress = findViewById(R.id.progress)
+        heroPanel = findViewById(R.id.heroPanel)
+        ivHero = findViewById(R.id.ivHero)
+        tvHeroTitle = findViewById(R.id.tvHeroTitle)
+        btnHero = findViewById(R.id.btnHero)
         rvRows.layoutManager = LinearLayoutManager(this)
         rvRows.adapter = rowAdapter
         rvRows.itemAnimator = null
@@ -72,6 +80,18 @@ class HomeActivity : AppCompatActivity() {
         } else {
             startActivity(Intent(this, MainActivity::class.java).putExtra("kind", k.name))
         }
+    }
+
+    /** Destaque no topo: um filme da lista, com o pôster como fundo. */
+    private fun bindHero(item: Item?) {
+        if (item == null) {
+            heroPanel.visibility = View.GONE
+            return
+        }
+        heroPanel.visibility = View.VISIBLE
+        tvHeroTitle.text = item.name
+        item.logo?.takeIf { it.isNotBlank() }?.let { ivHero.load(it) }
+        btnHero.setOnClickListener { openDetail(item) }
     }
 
     private fun openDetail(item: Item) {
@@ -113,6 +133,7 @@ class HomeActivity : AppCompatActivity() {
                         )
                     )
                 }
+            bindHero(Store.cache[Kind.MOVIE]?.items?.firstOrNull { !it.logo.isNullOrBlank() })
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {

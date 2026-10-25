@@ -45,7 +45,8 @@ class LiveActivity : AppCompatActivity() {
     private lateinit var tvNextTitle: TextView
     private lateinit var tvNextTime: TextView
 
-    private val catAdapter = CatAdapter { i, _ -> onCat(i) }
+    // post(): a troca de categoria acontece depois do layout, nunca durante ele
+    private val catAdapter = CatAdapter { i, _ -> rvCats.post { onCat(i) } }
     private val channelAdapter = ChannelAdapter(
         onFocus = { p -> schedulePreview(p) },
         onClick = { p -> openFull(p) }
