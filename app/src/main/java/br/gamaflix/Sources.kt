@@ -2,6 +2,8 @@ package br.gamaflix
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import android.util.JsonReader
+import android.util.JsonToken
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
@@ -37,6 +39,16 @@ object Net {
         error("Muitos redirecionamentos")
     }
 
+    /** Lê a resposta em fluxo (sem montar o texto inteiro na memória). */
+    fun <T> stream(url: String, block: (java.io.InputStream) -> T): T {
+        val c = open(url)
+        try {
+            return block(c.inputStream)
+        } finally {
+            c.disconnect()
+        }
+    }
+
     fun text(url: String): String {
         val c = open(url)
         try {
@@ -66,12 +78,35 @@ class XtreamSource(server: String, private val user: String, private val pass: S
     private fun api(action: String, extra: String = "") =
         "$base/player_api.php?username=$u&password=$p&action=$action$extra"
 
-    private fun array(url: String): JSONArray {
-        val t = Net.text(url).trim()
-        return when {
-            t.isEmpty() -> JSONArray()
-            t.startsWith("[") -> JSONArray(t)
-            else -> error("O servidor não devolveu uma lista (confira servidor, usuário e senha)")
+    /**
+     * Lê uma lista JSON em fluxo: cada objeto vira um mapa só com as chaves pedidas.
+     * Evita carregar o catálogo inteiro como texto + JSON na memória (estourava o TV).
+     */
+    private fun array(url: String, keys: Set<String>, each: (Map<String, String>) -> Unit) {
+        Net.stream(url) { input ->
+            val reader = JsonReader(input.bufferedReader())
+            reader.use {
+                if (it.peek() == JsonToken.END_DOCUMENT) return@stream
+                if (it.peek() != JsonToken.BEGIN_ARRAY)
+                    error("O servidor não devolveu uma lista (confira servidor, usuário e senha)")
+                it.beginArray()
+                while (it.hasNext()) {
+                    val map = HashMap<String, String>(keys.size)
+                    it.beginObject()
+                    while (it.hasNext()) {
+                        val k = it.nextName()
+                        val t = it.peek()
+                        if (k in keys && t != JsonToken.BEGIN_OBJECT && t != JsonToken.BEGIN_ARRAY) {
+                            map[k] = if (t == JsonToken.NULL) { it.nextNull(); "" } else it.nextString()
+                        } else {
+                            it.skipValue()
+                        }
+                    }
+                    it.endObject()
+                    each(map)
+                }
+                it.endArray()
+            }
         }
     }
 
@@ -81,41 +116,41 @@ class XtreamSource(server: String, private val user: String, private val pass: S
             Kind.MOVIE -> "get_vod_categories" to "get_vod_streams"
             Kind.SERIES -> "get_series_categories" to "get_series"
         }
-        val cj = array(api(catAction))
-        val cats = ArrayList<Cat>(cj.length())
-        for (i in 0 until cj.length()) {
-            val o = cj.getJSONObject(i)
-            cats.add(Cat(o.str("category_id"), o.str("category_name")))
+        val cats = ArrayList<Cat>()
+        array(api(catAction), setOf("category_id", "category_name")) { o ->
+            cats.add(Cat(o["category_id"].orEmpty(), o["category_name"].orEmpty()))
         }
         val hidden = if (kind == Kind.LIVE) emptySet() else cats.filter { channelName.containsMatchIn(it.name) }.map { it.id }.toSet()
         cats.removeAll { it.id in hidden }
-        val ij = array(api(itemAction))
-        val items = ArrayList<Item>(ij.length())
-        for (i in 0 until ij.length()) {
-            val o = ij.getJSONObject(i)
-            val name = o.str("name").trim()
-            val cat = o.str("category_id")
-            if (cat in hidden) continue
-            when (kind) {
+        val items = ArrayList<Item>()
+        val wanted = setOf(
+            "name", "category_id", "stream_id", "stream_icon", "container_extension",
+            "added", "series_id", "cover", "last_modified"
+        )
+        array(api(itemAction), wanted) { o ->
+            val name = o["name"].orEmpty().trim()
+            val cat = o["category_id"].orEmpty()
+            if (cat !in hidden) when (kind) {
                 Kind.LIVE -> {
-                    val id = o.str("stream_id")
+                    val id = o["stream_id"].orEmpty()
                     items.add(
-                        Item(id, name, o.str("stream_icon").ifBlank { null }, cat,
+                        Item(id, name, o["stream_icon"].orEmpty().ifBlank { null }, cat,
                             "$base/live/$u/$p/$id.m3u8", kind)
                     )
                 }
                 Kind.MOVIE -> {
-                    val id = o.str("stream_id")
-                    val ext = o.str("container_extension").ifBlank { "mp4" }
+                    val id = o["stream_id"].orEmpty()
+                    val ext = o["container_extension"].orEmpty().ifBlank { "mp4" }
                     items.add(
-                        Item(id, name, o.str("stream_icon").ifBlank { null }, cat,
-                            "$base/movie/$u/$p/$id.$ext", kind, null, o.str("added").toLongOrNull() ?: 0L)
+                        Item(id, name, o["stream_icon"].orEmpty().ifBlank { null }, cat,
+                            "$base/movie/$u/$p/$id.$ext", kind, null, o["added"]?.toLongOrNull() ?: 0L)
                     )
                 }
                 Kind.SERIES -> {
-                    val id = o.str("series_id")
+                    val id = o["series_id"].orEmpty()
                     items.add(
-                        Item(id, name, o.str("cover").ifBlank { null }, cat, null, kind, id, o.str("last_modified").toLongOrNull() ?: 0L)
+                        Item(id, name, o["cover"].orEmpty().ifBlank { null }, cat, null, kind, id,
+                            o["last_modified"]?.toLongOrNull() ?: 0L)
                     )
                 }
             }
@@ -194,13 +229,16 @@ class M3uSource(private val url: String) : Source {
     private val attr = Regex("([\\w-]+)=\"([^\"]*)\"")
     private val movieGroup = Regex("filme|movie|vod|cinema")
     private val seriesGroup = Regex("s[eé]rie|series|novela|temporada")
+    /** Marca de episódio no nome: "Nome S04E07". Tudo antes dela é o nome da série. */
+    private val seasonEp = Regex("(?i)\\s*[-–|:]?\\s*\\bS(\\d{1,2})\\s*[ .]?E(\\d{1,3})\\b")
+    private var episodeMap: Map<String, List<Ep>> = emptyMap()
 
     override suspend fun load(kind: Kind): Catalog = withContext(Dispatchers.IO) {
         val m = parsed ?: parse().also { parsed = it }
         m.getValue(kind)
     }
 
-    override suspend fun episodes(item: Item): List<Ep> = emptyList()
+    override suspend fun episodes(item: Item): List<Ep> = episodeMap[item.seriesId ?: item.id].orEmpty()
 
     private fun classify(link: String, group: String): Kind {
         val l = link.lowercase()
@@ -223,6 +261,7 @@ class M3uSource(private val url: String) : Source {
         val items = EnumMap<Kind, ArrayList<Item>>(Kind::class.java)
         val cats = EnumMap<Kind, LinkedHashSet<String>>(Kind::class.java)
         Kind.values().forEach { items[it] = ArrayList(); cats[it] = LinkedHashSet() }
+        val seriesRaw = ArrayList<Item>()
 
         val c = Net.open(url)
         try {
@@ -244,9 +283,8 @@ class M3uSource(private val url: String) : Source {
                     } else if (pending && line.isNotEmpty() && !line.startsWith("#")) {
                         val k = classify(line, group)
                         n++
-                        items.getValue(k).add(
-                            Item(n.toString(), name.ifBlank { "Canal $n" }, logo, group, line, k)
-                        )
+                        val built = Item(n.toString(), name.ifBlank { "Canal $n" }, logo, group, line, k)
+                        if (k == Kind.SERIES) seriesRaw.add(built) else items.getValue(k).add(built)
                         cats.getValue(k).add(group)
                         pending = false
                     }
@@ -255,6 +293,29 @@ class M3uSource(private val url: String) : Source {
         } finally {
             c.disconnect()
         }
+
+        // Episódios ("Nome S04E07") viram uma única série, com a lista de capítulos.
+        val eps = HashMap<String, MutableList<Triple<Int, Int, Ep>>>()
+        val seriesItems = LinkedHashMap<String, Item>()
+        for (e0 in seriesRaw) {
+            val u = e0.url ?: continue
+            val m = seasonEp.find(e0.name)
+            if (m == null) {
+                items.getValue(Kind.SERIES).add(e0)
+                continue
+            }
+            val base = e0.name.substring(0, m.range.first).trim().ifBlank { e0.name }
+            val key = base.lowercase()
+            val id = "s:$key"
+            seriesItems.getOrPut(key) { Item(id, base, e0.logo, e0.cat, null, Kind.SERIES, id) }
+            eps.getOrPut(key) { mutableList() }
+                .add(Triple(m.groupValues[1].toInt(), m.groupValues[2].toInt(), Ep(e0.name, u)))
+        }
+        items.getValue(Kind.SERIES).addAll(seriesItems.values)
+        episodeMap = eps.entries.associate { (key, list) ->
+            "s:$key" to list.sortedWith(compareBy({ it.first }, { it.second })).map { it.third }
+        }
+
         return Kind.values().associateWith { k ->
             Catalog(cats.getValue(k).map { Cat(it, it) }, items.getValue(k))
         }

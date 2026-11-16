@@ -223,6 +223,11 @@ class PlayerActivity : AppCompatActivity() {
         if (menuOpen) {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BACK -> { hideMenu(); return true }
+                // Descer no último canal fica nele (não volta ao topo).
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    val vh = currentFocus?.let { rvMenuChannels.findContainingViewHolder(it) }
+                    if (vh != null && vh.bindingAdapterPosition == menuChannels.size - 1) return true
+                }
                 // Seta esquerda na coluna de categorias fecha o menu (volta ao vídeo).
                 KeyEvent.KEYCODE_DPAD_LEFT ->
                     if (rvMenuCats.hasFocus()) { hideMenu(); return true }

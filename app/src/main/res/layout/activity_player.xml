@@ -22,7 +22,7 @@
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:layout_gravity="start"
-        android:background="@drawable/bg_gradient"
+        android:background="#D9000000"
         android:orientation="horizontal"
         android:paddingStart="32dp"
         android:paddingTop="24dp"
