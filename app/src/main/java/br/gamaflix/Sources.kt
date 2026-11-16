@@ -308,7 +308,7 @@ class M3uSource(private val url: String) : Source {
             val key = base.lowercase()
             val id = "s:$key"
             seriesItems.getOrPut(key) { Item(id, base, e0.logo, e0.cat, null, Kind.SERIES, id) }
-            eps.getOrPut(key) { mutableList() }
+            eps.getOrPut(key) { mutableListOf() }
                 .add(Triple(m.groupValues[1].toInt(), m.groupValues[2].toInt(), Ep(e0.name, u)))
         }
         items.getValue(Kind.SERIES).addAll(seriesItems.values)
