@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:paddingStart="40dp"
+    android:paddingTop="14dp"
+    android:paddingEnd="40dp"
+    android:paddingBottom="8dp">
+
+    <ImageView
+        android:layout_width="52dp"
+        android:layout_height="52dp"
+        android:contentDescription="GamaFlix"
+        android:scaleType="fitCenter"
+        android:src="@drawable/gamaflix_g" />
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_weight="1" />
+
+    <LinearLayout
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal">
+
+        <TextView android:id="@+id/navSearch" style="@style/TabText" android:text="Pesquisa" />
+        <TextView android:id="@+id/navHome" style="@style/TabText" android:text="Início" />
+        <TextView android:id="@+id/navLive" style="@style/TabText" android:text="Ao vivo" />
+        <TextView android:id="@+id/navMovies" style="@style/TabText" android:text="Filmes" />
+        <TextView android:id="@+id/navSeries" style="@style/TabText" android:layout_marginEnd="0dp" android:text="Séries" />
+    </LinearLayout>
+
+    <View
+        android:layout_width="0dp"
+        android:layout_height="1dp"
+        android:layout_weight="1" />
+
+    <TextView
+        android:id="@+id/navSettings"
+        style="@style/TabText"
+        android:layout_marginEnd="0dp"
+        android:text="⚙ Config." />
+</LinearLayout>

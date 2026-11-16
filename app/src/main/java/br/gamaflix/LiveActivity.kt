@@ -9,6 +9,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.MediaItem
@@ -26,6 +28,7 @@ import coil.load
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withPermit
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -49,10 +52,12 @@ class LiveActivity : AppCompatActivity() {
     private val catAdapter = CatAdapter { i, _ -> rvCats.post { onCat(i) } }
     private val channelAdapter = ChannelAdapter(
         onFocus = { p -> schedulePreview(p) },
-        onClick = { p -> openFull(p) }
+        onClick = { p -> openFull(p) },
+        onNeedEpg = { loadEpg(it) }
     )
 
     private var cats: List<Cat> = emptyList()
+    private var catIndex = 0
     private var channels: List<Item> = emptyList()
     private var selected = -1
     private var player: ExoPlayer? = null
@@ -95,10 +100,10 @@ class LiveActivity : AppCompatActivity() {
         rvCats.itemAnimator = null
         rvChannels.itemAnimator = null
 
-        findViewById<TextView>(R.id.tabHome).setOnClickListener { finish() }
-        findViewById<TextView>(R.id.tabLive).isSelected = true
-        findViewById<TextView>(R.id.tabMovies).setOnClickListener { switchTo(MainActivity::class.java, Kind.MOVIE) }
-        findViewById<TextView>(R.id.tabSeries).setOnClickListener { switchTo(MainActivity::class.java, Kind.SERIES) }
+        findViewById<TextView>(R.id.btnEpg).setOnClickListener { showFullEpg() }
+        Ui.bindTopBar(this, R.id.navLive)
+        // Seta esquerda na lista de canais volta à categoria atual (não à linha alinhada).
+        channelAdapter.onLeftEdge = { Ui.focusRow(rvCats, catIndex) }
         // Clicar na prévia também abre o canal em tela cheia.
         preview.setOnClickListener { if (selected >= 0) openFull(selected) }
         loadCatalog()
@@ -112,6 +117,7 @@ class LiveActivity : AppCompatActivity() {
             try {
                 val c = Store.cache[Kind.LIVE] ?: source.load(Kind.LIVE).also { Store.cache[Kind.LIVE] = it }
                 cats = listOf(Cat("*", "Todos")) + c.cats.filter { c.byCat.containsKey(it.id) }
+                catIndex = 0
                 catAdapter.setData(cats, 0)
                 showCategory(0)
             } catch (e: CancellationException) {
@@ -126,6 +132,7 @@ class LiveActivity : AppCompatActivity() {
     }
 
     private fun onCat(i: Int) {
+        catIndex = i
         catAdapter.setSelected(i)
         showCategory(i)
     }
@@ -200,17 +207,26 @@ class LiveActivity : AppCompatActivity() {
         player?.stop()
     }
 
+    private val epgGate = kotlinx.coroutines.sync.Semaphore(3)
+    private val epgPending = HashSet<String>()
+
     private fun loadEpg(item: Item) {
         val cached = epgCache[item.id]
-        if (cached != null && System.currentTimeMillis() - cached.first < 5 * 60_000) return
+        if (cached != null && System.currentTimeMillis() - cached.first < 5 * 60_000) {
+            channelAdapter.setNow(item.id, nowOf(cached.second, nowSec())?.title ?: "Sem programação")
+            return
+        }
+        if (!epgPending.add(item.id)) return
         lifecycleScope.launch {
             val progs = try {
-                Store.source?.epg(item) ?: emptyList()
+                epgGate.withPermit { Store.source?.epg(item) ?: emptyList() }
             } catch (e: CancellationException) {
+                epgPending.remove(item.id)
                 throw e
             } catch (e: Exception) {
                 emptyList()
             }
+            epgPending.remove(item.id)
             epgCache[item.id] = System.currentTimeMillis() to progs
             channelAdapter.setNow(item.id, nowOf(progs, nowSec())?.title ?: "Sem programação")
             if (channels.getOrNull(selected)?.id == item.id) refreshNowNext()
@@ -253,6 +269,37 @@ class LiveActivity : AppCompatActivity() {
         finish()
     }
 
+    /** Programação completa do canal (com descrição de cada programa), para ler. */
+    private fun showFullEpg() {
+        val item = channels.getOrNull(selected)
+        if (item == null) {
+            Toast.makeText(this, "Selecione um canal", Toast.LENGTH_SHORT).show()
+            return
+        }
+        lifecycleScope.launch {
+            val progs = try {
+                Store.source?.epg(item) ?: emptyList()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                emptyList()
+            }
+            if (progs.isEmpty()) {
+                Toast.makeText(this@LiveActivity, "Este canal não tem programação disponível", Toast.LENGTH_LONG).show()
+                return@launch
+            }
+            val text = progs.joinToString("\n\n") { p ->
+                val head = "${hm(p.start)} – ${hm(p.stop)}  ${p.title}"
+                if (p.desc.isNotBlank()) "$head\n${p.desc}" else head
+            }
+            AlertDialog.Builder(this@LiveActivity, R.style.NovaDialog)
+                .setTitle(item.name)
+                .setMessage(text)
+                .setPositiveButton("Fechar", null)
+                .show()
+        }
+    }
+
     private fun nowSec(): Long = System.currentTimeMillis() / 1000
 
     private fun nowOf(progs: List<Prog>, t: Long): Prog? = progs.firstOrNull { t >= it.start && t < it.stop }
@@ -283,11 +330,13 @@ class LiveActivity : AppCompatActivity() {
 
 class ChannelAdapter(
     private val onFocus: (Int) -> Unit,
-    private val onClick: (Int) -> Unit
+    private val onClick: (Int) -> Unit,
+    private val onNeedEpg: (Item) -> Unit = {}
 ) : RecyclerView.Adapter<ChannelAdapter.VH>() {
 
     private var data: List<Item> = emptyList()
     private val nowTitles = HashMap<String, String>()
+    var onLeftEdge: (() -> Unit)? = null
 
     fun set(d: List<Item>) {
         data = d
@@ -295,6 +344,7 @@ class ChannelAdapter(
     }
 
     fun setNow(id: String, title: String) {
+        if (nowTitles[id] == title) return
         nowTitles[id] = title
         val i = data.indexOfFirst { it.id == id }
         if (i >= 0) notifyItemChanged(i)
@@ -326,7 +376,10 @@ class ChannelAdapter(
                 error(R.drawable.ph)
             }
         }
-        h.itemView.setOnFocusChangeListener { _, focused ->
+        // Pede a programação atual deste canal (fora do layout, para não conflitar com a tela).
+        if (!nowTitles.containsKey(item.id)) h.itemView.post { onNeedEpg(item) }
+        h.itemView.setOnFocusChangeListener { v, focused ->
+            Ui.focusScale(v, focused)
             val p = h.bindingAdapterPosition
             if (focused && p >= 0) onFocus(p)
         }
@@ -334,5 +387,6 @@ class ChannelAdapter(
             val p = h.bindingAdapterPosition
             if (p >= 0) onClick(p)
         }
+        Ui.edgeKeys(h.itemView, i, data.size, 1, onLeftEdge)
     }
 }

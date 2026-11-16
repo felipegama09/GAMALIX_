@@ -18,6 +18,8 @@ import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.ui.PlayerView
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.RecyclerView
 
 @UnstableApi
 class PlayerActivity : AppCompatActivity() {
@@ -32,12 +34,35 @@ class PlayerActivity : AppCompatActivity() {
     private var triedTs = false
     private var resumeMs = 0L
 
+    // Menu suspenso de canais (Ao vivo, tela cheia), aberto com a seta esquerda.
+    private lateinit var menu: View
+    private lateinit var rvMenuCats: RecyclerView
+    private lateinit var rvMenuChannels: RecyclerView
+    private var menuCats: List<Cat> = emptyList()
+    private var menuCatIndex = 0
+    private var menuChannels: List<Item> = emptyList()
+    private val menuCatAdapter = CatAdapter { i, _ -> rvMenuCats.post { showMenuCategory(i) } }
+    private val menuChannelAdapter = ChannelAdapter(
+        onFocus = { },
+        onClick = { p -> pickFromMenu(p) },
+        onNeedEpg = { }
+    )
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         setContentView(R.layout.activity_player)
         view = findViewById(R.id.player)
         osd = findViewById(R.id.osd)
+        menu = findViewById(R.id.menu)
+        rvMenuCats = findViewById(R.id.rvMenuCats)
+        rvMenuChannels = findViewById(R.id.rvMenuChannels)
+        rvMenuCats.layoutManager = LinearLayoutManager(this)
+        rvMenuChannels.layoutManager = LinearLayoutManager(this)
+        rvMenuCats.adapter = menuCatAdapter
+        rvMenuChannels.adapter = menuChannelAdapter
+        // Seta esquerda na lista de canais volta às categorias do menu.
+        menuChannelAdapter.onLeftEdge = { Ui.focusRow(rvMenuCats, menuCatIndex) }
         index = Store.playIndex
         resumeMs = Resume.pos
         Resume.pos = 0L
@@ -145,9 +170,70 @@ class PlayerActivity : AppCompatActivity() {
         handler.postDelayed(hideOsd, 3500)
     }
 
+    // ---------- Menu suspenso (Ao vivo) ----------
+
+    private val menuOpen get() = menu.visibility == View.VISIBLE
+
+    /** Só existe para canais ao vivo: filmes e séries não têm esse menu. */
+    private fun canOpenMenu(): Boolean =
+        Store.zap && Store.cache[Kind.LIVE] != null && Store.playList.firstOrNull()?.kind == Kind.LIVE
+
+    private fun openMenu() {
+        val c = Store.cache[Kind.LIVE] ?: return
+        menuCats = listOf(Cat("*", "Todos")) + c.cats.filter { c.byCat.containsKey(it.id) }
+        // Abre na categoria do canal que está tocando (ou em "Todos").
+        val current = Store.playList.getOrNull(index)
+        menuCatIndex = menuCats.indexOfFirst { it.id == current?.cat }.takeIf { it >= 0 } ?: 0
+        menuCatAdapter.setData(menuCats, menuCatIndex)
+        menu.visibility = View.VISIBLE
+        showMenuCategory(menuCatIndex)
+        rvMenuCats.post { Ui.focusRow(rvMenuCats, menuCatIndex) }
+    }
+
+    private fun hideMenu() {
+        if (!menuOpen) return
+        menu.visibility = View.GONE
+        view.requestFocus()
+    }
+
+    private fun showMenuCategory(i: Int) {
+        val c = Store.cache[Kind.LIVE] ?: return
+        val cat = menuCats.getOrNull(i) ?: return
+        menuCatIndex = i
+        menuCatAdapter.setSelected(i)
+        menuChannels = if (cat.id == "*") c.items else c.byCat[cat.id].orEmpty()
+        menuChannelAdapter.set(menuChannels)
+        // Na categoria do canal atual, posiciona a lista no canal que está tocando.
+        val current = Store.playList.getOrNull(index)
+        val pos = menuChannels.indexOfFirst { it.id == current?.id }
+        if (pos >= 0) rvMenuChannels.scrollToPosition(pos) else rvMenuChannels.scrollToPosition(0)
+    }
+
+    private fun pickFromMenu(p: Int) {
+        if (p !in menuChannels.indices) return
+        // Troca a lista de zapping pela categoria escolhida e toca o canal em tela cheia.
+        Store.playList = menuChannels
+        hideMenu()
+        play(p)
+    }
+
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-        if (Store.zap && event.action == KeyEvent.ACTION_DOWN) {
+        if (event.action != KeyEvent.ACTION_DOWN) return super.dispatchKeyEvent(event)
+
+        if (menuOpen) {
             when (event.keyCode) {
+                KeyEvent.KEYCODE_BACK -> { hideMenu(); return true }
+                // Seta esquerda na coluna de categorias fecha o menu (volta ao vídeo).
+                KeyEvent.KEYCODE_DPAD_LEFT ->
+                    if (rvMenuCats.hasFocus()) { hideMenu(); return true }
+            }
+            // Com o menu aberto, as demais teclas navegam dentro dele (não zapeiam).
+            return super.dispatchKeyEvent(event)
+        }
+
+        if (Store.zap) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> if (canOpenMenu()) { openMenu(); return true }
                 KeyEvent.KEYCODE_DPAD_UP -> { zap(-1); return true }
                 KeyEvent.KEYCODE_DPAD_DOWN -> { zap(1); return true }
                 KeyEvent.KEYCODE_CHANNEL_UP -> { zap(1); return true }

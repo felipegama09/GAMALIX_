@@ -77,12 +77,9 @@ class DetailActivity : AppCompatActivity() {
         btnExternal.setOnClickListener { openExternal() }
 
         if (item.kind == Kind.SERIES) {
-            epColumn.visibility = View.VISIBLE
-            btnPlay.setOnClickListener {
-                if (episodes.isNotEmpty()) playEpisode(0)
-                else Toast.makeText(this, "Carregando episódios...", Toast.LENGTH_SHORT).show()
-            }
-            loadEpisodes()
+            // Séries: os episódios só são carregados quando o usuário escolhe.
+            btnPlay.text = "▶  Escolher episódio"
+            btnPlay.setOnClickListener { showEpisodes() }
         } else {
             btnPlay.setOnClickListener { playMovie(0L) }
             History.all(this).firstOrNull { it.url == item.url }?.takeIf { it.pos >= 5_000 }?.let { saved ->
@@ -103,7 +100,9 @@ class DetailActivity : AppCompatActivity() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
-                MediaInfo()
+                progress.visibility = View.GONE
+                tvPlot.text = "Não foi possível carregar a sinopse (${e.message ?: "erro de conexão"})."
+                return@launch
             }
             progress.visibility = View.GONE
 
@@ -122,6 +121,16 @@ class DetailActivity : AppCompatActivity() {
         }
     }
 
+    private var epRequested = false
+
+    private fun showEpisodes() {
+        epColumn.visibility = View.VISIBLE
+        if (!epRequested) {
+            epRequested = true
+            loadEpisodes()
+        }
+    }
+
     private fun loadEpisodes() {
         lifecycleScope.launch {
             try {
@@ -131,6 +140,7 @@ class DetailActivity : AppCompatActivity() {
             } catch (e: CancellationException) {
                 throw e
             } catch (e: Exception) {
+                epRequested = false
                 tvEpHeader.text = "Falha ao carregar episódios"
             }
         }

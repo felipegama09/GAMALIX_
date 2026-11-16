@@ -16,6 +16,34 @@
         app:surface_type="surface_view"
         app:use_controller="true" />
 
+    <!-- Menu suspenso (Ao vivo, tela cheia): mesmas medidas do menu lateral da tela ao vivo. -->
+    <LinearLayout
+        android:id="@+id/menu"
+        android:layout_width="wrap_content"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@drawable/bg_gradient"
+        android:orientation="horizontal"
+        android:paddingStart="32dp"
+        android:paddingTop="24dp"
+        android:paddingEnd="16dp"
+        android:paddingBottom="24dp"
+        android:visibility="gone">
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvMenuCats"
+            android:layout_width="220dp"
+            android:layout_height="match_parent"
+            android:clipToPadding="false" />
+
+        <androidx.recyclerview.widget.RecyclerView
+            android:id="@+id/rvMenuChannels"
+            android:layout_width="360dp"
+            android:layout_height="match_parent"
+            android:layout_marginStart="16dp"
+            android:clipToPadding="false" />
+    </LinearLayout>
+
     <TextView
         android:id="@+id/osd"
         android:layout_width="wrap_content"

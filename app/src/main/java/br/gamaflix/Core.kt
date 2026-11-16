@@ -14,7 +14,9 @@ data class Item(
     val cat: String,
     val url: String?,
     val kind: Kind,
-    val seriesId: String? = null
+    val seriesId: String? = null,
+    /** Data de adição no servidor (segundos desde 1970); 0 quando não informada. */
+    val added: Long = 0L
 )
 
 data class Ep(val title: String, val url: String)
@@ -38,6 +40,8 @@ object Store {
     var playIndex = 0
     var zap = false
     var autoNext = false
+    /** Pedido para abrir Configurações ao voltar ao Início (vindo da barra superior). */
+    var openSettings = false
 
     fun reset() {
         source = null
@@ -57,6 +61,17 @@ object Prefs {
             .putString("user", user)
             .putString("pass", pass)
             .apply()
+    }
+
+    /** Dados salvos da lista, para a tela de alteração. */
+    fun current(c: Context): Map<String, String> {
+        val s = sp(c)
+        return mapOf(
+            "mode" to s.getString("mode", "xtream").orEmpty(),
+            "server" to s.getString("server", "").orEmpty(),
+            "user" to s.getString("user", "").orEmpty(),
+            "pass" to s.getString("pass", "").orEmpty()
+        )
     }
 
     fun clear(c: Context) {

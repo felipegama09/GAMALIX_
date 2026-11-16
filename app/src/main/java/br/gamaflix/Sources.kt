@@ -47,6 +47,9 @@ object Net {
     }
 }
 
+/** Categorias com nome de canal não devem aparecer em Filmes nem em Séries. */
+private val channelName = Regex("canal|canais|channel|ao vivo", RegexOption.IGNORE_CASE)
+
 private fun JSONObject.str(key: String): String {
     val v = opt(key)
     return if (v == null || v == JSONObject.NULL) "" else v.toString()
@@ -84,12 +87,15 @@ class XtreamSource(server: String, private val user: String, private val pass: S
             val o = cj.getJSONObject(i)
             cats.add(Cat(o.str("category_id"), o.str("category_name")))
         }
+        val hidden = if (kind == Kind.LIVE) emptySet() else cats.filter { channelName.containsMatchIn(it.name) }.map { it.id }.toSet()
+        cats.removeAll { it.id in hidden }
         val ij = array(api(itemAction))
         val items = ArrayList<Item>(ij.length())
         for (i in 0 until ij.length()) {
             val o = ij.getJSONObject(i)
             val name = o.str("name").trim()
             val cat = o.str("category_id")
+            if (cat in hidden) continue
             when (kind) {
                 Kind.LIVE -> {
                     val id = o.str("stream_id")
@@ -103,13 +109,13 @@ class XtreamSource(server: String, private val user: String, private val pass: S
                     val ext = o.str("container_extension").ifBlank { "mp4" }
                     items.add(
                         Item(id, name, o.str("stream_icon").ifBlank { null }, cat,
-                            "$base/movie/$u/$p/$id.$ext", kind)
+                            "$base/movie/$u/$p/$id.$ext", kind, null, o.str("added").toLongOrNull() ?: 0L)
                     )
                 }
                 Kind.SERIES -> {
                     val id = o.str("series_id")
                     items.add(
-                        Item(id, name, o.str("cover").ifBlank { null }, cat, null, kind, id)
+                        Item(id, name, o.str("cover").ifBlank { null }, cat, null, kind, id, o.str("last_modified").toLongOrNull() ?: 0L)
                     )
                 }
             }
@@ -145,7 +151,7 @@ class XtreamSource(server: String, private val user: String, private val pass: S
     }
     override suspend fun epg(item: Item): List<Prog> = withContext(Dispatchers.IO) {
         try {
-            val root = JSONObject(Net.text(api("get_short_epg", "&stream_id=${item.id}&limit=4")))
+            val root = JSONObject(Net.text(api("get_short_epg", "&stream_id=${item.id}&limit=30")))
             val arr = root.optJSONArray("epg_listings") ?: return@withContext emptyList()
             val out = ArrayList<Prog>()
             for (i in 0 until arr.length()) {
@@ -160,28 +166,25 @@ class XtreamSource(server: String, private val user: String, private val pass: S
         }
     }
     override suspend fun info(item: Item): MediaInfo = withContext(Dispatchers.IO) {
-        try {
-            val url = if (item.kind == Kind.SERIES) {
-                api("get_series_info", "&series_id=${item.seriesId}")
-            } else {
-                api("get_vod_info", "&vod_id=${item.id}")
-            }
-            val root = JSONObject(Net.text(url))
-            val info = root.optJSONObject("info") ?: JSONObject()
-            MediaInfo(
-                plot = info.str("plot").ifBlank { info.str("description") },
-                cast = info.str("cast").ifBlank { info.str("actors") },
-                director = info.str("director"),
-                genre = info.str("genre"),
-                year = info.str("releasedate").ifBlank { info.str("releaseDate") }.take(4),
-                rating = info.str("rating"),
-                duration = info.str("duration").ifBlank { info.str("episode_run_time") },
-                poster = info.str("movie_image").ifBlank { info.str("cover") }.ifBlank { null },
-                backdrop = info.optJSONArray("backdrop_path")?.optString(0)?.ifBlank { null }
-            )
-        } catch (e: Exception) {
-            MediaInfo()
+        // Sem try/catch: erro de rede aparece na tela de detalhes em vez de sumir.
+        val url = if (item.kind == Kind.SERIES) {
+            api("get_series_info", "&series_id=${item.seriesId}")
+        } else {
+            api("get_vod_info", "&vod_id=${item.id}")
         }
+        val root = JSONObject(Net.text(url))
+        val info = root.optJSONObject("info") ?: JSONObject()
+        MediaInfo(
+            plot = info.str("plot").ifBlank { info.str("description") },
+            cast = info.str("cast").ifBlank { info.str("actors") },
+            director = info.str("director"),
+            genre = info.str("genre"),
+            year = info.str("releasedate").ifBlank { info.str("releaseDate") }.take(4),
+            rating = info.str("rating"),
+            duration = info.str("duration").ifBlank { info.str("episode_run_time") },
+            poster = info.str("movie_image").ifBlank { info.str("cover") }.ifBlank { null },
+            backdrop = info.optJSONArray("backdrop_path")?.optString(0)?.ifBlank { null }
+        )
     }
 }
 
@@ -203,11 +206,15 @@ class M3uSource(private val url: String) : Source {
         val l = link.lowercase()
         val g = group.lowercase()
         return when {
+            "/live/" in l -> Kind.LIVE
             "/movie/" in l -> Kind.MOVIE
             "/series/" in l -> Kind.SERIES
+            // HLS (.m3u8) é canal ao vivo, mesmo que o grupo tenha a palavra "filme".
+            l.endsWith(".m3u8") -> Kind.LIVE
+            channelName.containsMatchIn(g) -> Kind.LIVE
+            l.endsWith(".mp4") || l.endsWith(".mkv") || l.endsWith(".avi") -> Kind.MOVIE
             movieGroup.containsMatchIn(g) -> Kind.MOVIE
             seriesGroup.containsMatchIn(g) -> Kind.SERIES
-            l.endsWith(".mp4") || l.endsWith(".mkv") || l.endsWith(".avi") -> Kind.MOVIE
             else -> Kind.LIVE
         }
     }

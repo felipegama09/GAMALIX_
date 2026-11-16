@@ -43,7 +43,8 @@ class CatAdapter(private val onPick: (index: Int, byClick: Boolean) -> Unit) :
             val p = h.bindingAdapterPosition
             if (p >= 0) onPick(p, true)
         }
-        h.tv.setOnFocusChangeListener { _, focused ->
+        h.tv.setOnFocusChangeListener { v, focused ->
+            Ui.focusScale(v, focused)
             val p = h.bindingAdapterPosition
             if (focused && p >= 0) {
                 // Espera o foco parar: ao segurar a tecla não há atualização de lista a cada passo.
@@ -58,14 +59,27 @@ class CatAdapter(private val onPick: (index: Int, byClick: Boolean) -> Unit) :
     }
 }
 
-class ItemAdapter(private val onClick: (List<Item>, Int) -> Unit) :
-    RecyclerView.Adapter<ItemAdapter.VH>() {
+class ItemAdapter(
+    private val onClick: (List<Item>, Int) -> Unit,
+    private val onFocus: ((Item) -> Unit)? = null
+) : RecyclerView.Adapter<ItemAdapter.VH>() {
 
     var kind: Kind = Kind.LIVE
+    /** Colunas da grade (para saber a primeira coluna e a última linha). */
+    var spanCount = 1
+    /** Seta esquerda na primeira coluna. */
+    var onLeftEdge: (() -> Unit)? = null
+    /** Largura de cada coluna da grade, em pixels (0 = ainda não medida). */
+    private var cellPx = 0
     private var data: List<Item> = emptyList()
 
     fun set(d: List<Item>) {
         data = d
+        notifyDataSetChanged()
+    }
+
+    fun setCell(px: Int) {
+        cellPx = px
         notifyDataSetChanged()
     }
 
@@ -84,7 +98,12 @@ class ItemAdapter(private val onClick: (List<Item>, Int) -> Unit) :
         val d = h.itemView.resources.displayMetrics.density
         val live = kind == Kind.LIVE
         h.title.text = item.name
-        h.img.layoutParams.height = ((if (live) 78 else 178) * d).toInt()
+        // Capa proporcional à coluna (margens do cartão descontadas); proporção 2:3.
+        h.img.layoutParams.height = when {
+            live -> (78 * d).toInt()
+            cellPx > 0 -> (((cellPx / d) - 22f) / 0.68f * d).toInt()
+            else -> (120 * d).toInt()
+        }
         h.img.scaleType = if (live) ImageView.ScaleType.FIT_CENTER else ImageView.ScaleType.CENTER_CROP
         val pad = if (live) (10 * d).toInt() else 0
         h.img.setPadding(pad, pad, pad, pad)
@@ -104,5 +123,10 @@ class ItemAdapter(private val onClick: (List<Item>, Int) -> Unit) :
             val p = h.bindingAdapterPosition
             if (p >= 0) onClick(data, p)
         }
+        h.itemView.setOnFocusChangeListener { v, f ->
+            Ui.focusScale(v, f)
+            if (f) onFocus?.invoke(item)
+        }
+        Ui.edgeKeys(h.itemView, i, data.size, spanCount, onLeftEdge)
     }
 }

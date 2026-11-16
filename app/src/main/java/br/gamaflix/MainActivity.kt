@@ -3,11 +3,8 @@ package br.gamaflix
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
-import android.widget.ImageView
-import coil.load
 import android.widget.EditText
 import android.widget.TextView
-import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
@@ -19,18 +16,23 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
+/** Filmes e Séries: menu lateral de categorias (com "Últimos") e grade de capas. */
 class MainActivity : AppCompatActivity() {
+
+    companion object {
+        /** Categoria virtual: os itens adicionados mais recentemente. */
+        const val RECENT = "__recent__"
+    }
 
     private lateinit var rvCats: RecyclerView
     private lateinit var rvItems: RecyclerView
     private lateinit var tvEmpty: TextView
     private lateinit var progress: View
-    private lateinit var tabs: List<Pair<TextView, Kind>>
     private lateinit var grid: GridLayoutManager
-    private lateinit var itemAdapter: ItemAdapter
+    private val itemAdapter = ItemAdapter(onClick = { list, pos -> onItem(list, pos) })
     private val catAdapter = CatAdapter { index, byClick -> rvCats.post { onCat(index, byClick) } }
 
-    private var kind = Kind.LIVE
+    private var kind = Kind.MOVIE
     private var catalog: Catalog? = null
     private var cats: List<Cat> = emptyList()
     private var catIndex = 0
@@ -52,28 +54,17 @@ class MainActivity : AppCompatActivity() {
         progress = findViewById(R.id.progress)
 
         grid = GridLayoutManager(this, 4)
-        itemAdapter = ItemAdapter { list, pos -> onItem(list, pos) }
         rvItems.layoutManager = grid
         rvItems.adapter = itemAdapter
         rvItems.setHasFixedSize(true)
         rvItems.itemAnimator = null
         rvItems.setItemViewCacheSize(8)
+        itemAdapter.onLeftEdge = { Ui.focusRow(rvCats, catIndex) }
+        rvItems.post { applyGrid() }
 
         rvCats.layoutManager = LinearLayoutManager(this)
         rvCats.adapter = catAdapter
         rvCats.itemAnimator = null
-
-        tabs = listOf(
-            findViewById<TextView>(R.id.tabLive) to Kind.LIVE,
-            findViewById<TextView>(R.id.tabMovies) to Kind.MOVIE,
-            findViewById<TextView>(R.id.tabSeries) to Kind.SERIES
-        )
-        tabs.forEach { (v, k) -> v.setOnClickListener { select(k) } }
-        // VOD e Início sempre abrem a tela certa (VOD tem layout próprio).
-        findViewById<TextView>(R.id.tabLive).setOnClickListener { switchTo(LiveActivity::class.java) }
-        findViewById<TextView>(R.id.tabHome).setOnClickListener { finish() }
-        findViewById<TextView>(R.id.btnSearch).setOnClickListener { askSearch() }
-        findViewById<TextView>(R.id.btnLogout).setOnClickListener { logout() }
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
@@ -87,14 +78,25 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
-        select(intent.getStringExtra("kind")?.let { Kind.valueOf(it) } ?: Kind.LIVE)
+        val start = intent.getStringExtra("kind")?.let { Kind.valueOf(it) } ?: Kind.MOVIE
+        Ui.bindTopBar(this, if (start == Kind.SERIES) R.id.navSeries else R.id.navMovies)
+        select(start)
+    }
+
+    /** Colunas conforme a largura: no mínimo 4, para as capas ficarem pequenas. */
+    private fun applyGrid() {
+        val w = rvItems.width
+        if (w <= 0) return
+        val d = resources.displayMetrics.density
+        val cols = maxOf(4, (w / (150 * d)).toInt())
+        grid.spanCount = cols
+        itemAdapter.spanCount = cols
+        itemAdapter.setCell(w / cols)
     }
 
     private fun select(k: Kind) {
         kind = k
         query = ""
-        tabs.forEach { it.first.isSelected = it.second == k }
-        grid.spanCount = if (k == Kind.LIVE) 4 else 5
         itemAdapter.kind = k
 
         job?.cancel()
@@ -109,8 +111,10 @@ class MainActivity : AppCompatActivity() {
             try {
                 val c = Store.cache[k] ?: Store.source!!.load(k).also { Store.cache[k] = it }
                 catalog = c
-                cats = listOf(Cat("*", "Todos")) + c.cats.filter { c.byCat.containsKey(it.id) }
-                catIndex = if (cats.size > 1) 1 else 0
+                val recentName = if (k == Kind.SERIES) "Últimas séries" else "Últimos filmes"
+                cats = listOf(Cat("*", "Todos"), Cat(RECENT, recentName)) +
+                    c.cats.filter { c.byCat.containsKey(it.id) }
+                catIndex = 1 // abre em "Últimos"
                 catAdapter.setData(cats, catIndex)
                 refreshItems()
             } catch (e: CancellationException) {
@@ -132,17 +136,27 @@ class MainActivity : AppCompatActivity() {
         refreshItems()
     }
 
+    /** Itens mais recentes primeiro (pela data de adição do servidor). Sem data, usa o fim da lista. */
+    private fun recentItems(c: Catalog): List<Item> {
+        val dated = c.items.filter { it.added > 0 }.sortedByDescending { it.added }
+        val src = if (dated.isNotEmpty()) dated else c.items.asReversed()
+        return src.take(300)
+    }
+
     private fun refreshItems() {
         val c = catalog ?: return
         if (cats.isEmpty()) return
+        val id = cats[catIndex].id
         val base = when {
             query.isNotEmpty() -> c.items
-            cats[catIndex].id == "*" -> c.items
-            else -> c.byCat[cats[catIndex].id].orEmpty()
+            id == "*" -> c.items
+            id == RECENT -> recentItems(c)
+            else -> c.byCat[id].orEmpty()
         }
         val list = if (query.isEmpty()) base else base.filter { it.name.contains(query, ignoreCase = true) }
         itemAdapter.set(list)
         rvItems.scrollToPosition(0)
+        rvItems.post { applyGrid() }
         if (list.isEmpty()) {
             showEmpty(if (query.isEmpty()) "Nada por aqui." else "Nada encontrado para \"$query\".")
         } else {
@@ -155,67 +169,9 @@ class MainActivity : AppCompatActivity() {
         tvEmpty.visibility = View.VISIBLE
     }
 
-    /** Abre outra seção e fecha esta, para a pilha ficar sempre: Início, seção atual. */
-    private fun switchTo(cls: Class<*>) {
-        startActivity(Intent(this, cls))
-        finish()
-    }
-
     private fun onItem(list: List<Item>, pos: Int) {
         Pick.item = list[pos]
         startActivity(Intent(this, DetailActivity::class.java))
     }
 
-    private fun showEpisodes(item: Item) {
-        progress.visibility = View.VISIBLE
-        lifecycleScope.launch {
-            try {
-                val eps = Store.source!!.episodes(item)
-                if (eps.isEmpty()) {
-                    Toast.makeText(this@MainActivity, "Sem episódios disponíveis", Toast.LENGTH_SHORT).show()
-                    return@launch
-                }
-                val labels = eps.map { it.title }.toTypedArray()
-                AlertDialog.Builder(this@MainActivity, R.style.NovaDialog)
-                    .setTitle(item.name)
-                    .setItems(labels) { _, which ->
-                        Store.playList = eps.map { Item(it.url, it.title, item.logo, "", it.url, Kind.SERIES) }
-                        Store.playIndex = which
-                        Store.zap = false
-                        Store.autoNext = true
-                        startActivity(Intent(this@MainActivity, PlayerActivity::class.java))
-                    }
-                    .show()
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Toast.makeText(this@MainActivity, "Falha: ${e.message}", Toast.LENGTH_LONG).show()
-            } finally {
-                progress.visibility = View.GONE
-            }
-        }
-    }
-
-    private fun askSearch() {
-        val et = EditText(this)
-        et.setSingleLine()
-        et.hint = "Digite o nome"
-        et.setText(query)
-        AlertDialog.Builder(this, R.style.NovaDialog)
-            .setTitle("Buscar em ${tabs.first { it.second == kind }.first.text}")
-            .setView(et)
-            .setPositiveButton("Buscar") { _, _ ->
-                query = et.text.toString().trim()
-                refreshItems()
-            }
-            .setNegativeButton("Cancelar", null)
-            .show()
-    }
-
-    private fun logout() {
-        Prefs.clear(this)
-        Store.reset()
-        startActivity(Intent(this, LoginActivity::class.java))
-        finish()
-    }
 }

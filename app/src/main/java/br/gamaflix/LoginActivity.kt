@@ -15,8 +15,11 @@ class LoginActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Vindo de Configurações > Alterar dados da lista: mostra os dados atuais para editar.
+        val editing = intent.getBooleanExtra("edit", false)
+
         // Login salvo: vai direto para a lista.
-        Prefs.buildSource(this)?.let {
+        if (!editing) Prefs.buildSource(this)?.let {
             Store.source = it
             goMain()
             return
@@ -62,10 +65,25 @@ class LoginActivity : AppCompatActivity() {
             if (!xtream) enter() else etUser.requestFocus()
             true
         }
-        mode(true)
+        if (editing) {
+            val cur = Prefs.current(this)
+            etServer.setText(cur["server"])
+            etUser.setText(cur["user"])
+            etPass.setText(cur["pass"])
+            mode(cur["mode"] != "m3u")
+            btn.text = "Salvar alterações"
+        } else {
+            mode(true)
+        }
     }
 
     private fun goMain() {
+        // Ao alterar, volta para a Home que já está aberta (ela recarrega com a nova lista).
+        if (intent.getBooleanExtra("edit", false)) {
+            Toast.makeText(this, "Lista atualizada", Toast.LENGTH_SHORT).show()
+            finish()
+            return
+        }
         startActivity(Intent(this, HomeActivity::class.java))
         finish()
     }
